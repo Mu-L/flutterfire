@@ -51,10 +51,10 @@ NSString *const kFLTFirebaseFunctionsChannelName = @"plugins.flutter.io/firebase
         NSString *httpsErrorCode = [NSString stringWithFormat:@"%ld", error.code];
         NSString *httpsErrorMessage = error.localizedDescription;
         // FIRFunctionsErrorDomain has been removed and replaced with Swift implementation
-        // https://github.com/firebase/firebase-ios-sdk/blob/master/FirebaseFunctions/Sources/FunctionsError.swift#L18
+        // https://github.com/firebase/firebase-ios-sdk/blob/main/FirebaseFunctions/Sources/FunctionsError.swift#L18
         NSString *errorDomain = @"com.firebase.functions";
         // FIRFunctionsErrorDetailsKey has been deprecated and replaced with Swift implementation
-        // https://github.com/firebase/firebase-ios-sdk/blob/master/FirebaseFunctions/Sources/FunctionsError.swift#L21
+        // https://github.com/firebase/firebase-ios-sdk/blob/main/FirebaseFunctions/Sources/FunctionsError.swift#L21
         NSString *detailsKey = @"details";
         // See also https://github.com/firebase/firebase-ios-sdk/pull/9569
         if ([error.domain isEqualToString:errorDomain]) {
@@ -81,10 +81,12 @@ NSString *const kFLTFirebaseFunctionsChannelName = @"plugins.flutter.io/firebase
 - (void)httpsFunctionCall:(id)arguments withMethodCallResult:(FLTFirebaseMethodCallResult *)result {
   NSString *appName = arguments[@"appName"];
   NSString *functionName = arguments[@"functionName"];
+  NSString *functionUri = arguments[@"functionUri"];
   NSString *origin = arguments[@"origin"];
   NSString *region = arguments[@"region"];
   NSNumber *timeout = arguments[@"timeout"];
   NSObject *parameters = arguments[@"parameters"];
+  NSNumber *limitedUseAppCheckToken = arguments[@"limitedUseAppCheckToken"];
 
   FIRApp *app = [FLTFirebasePlugin firebaseAppNamed:appName];
   FIRFunctions *functions = [FIRFunctions functionsForApp:app region:region];
@@ -93,7 +95,20 @@ NSString *const kFLTFirebaseFunctionsChannelName = @"plugins.flutter.io/firebase
     [functions useEmulatorWithHost:[url host] port:[[url port] intValue]];
   }
 
-  FIRHTTPSCallable *function = [functions HTTPSCallableWithName:functionName];
+  FIRHTTPSCallableOptions *options = [[FIRHTTPSCallableOptions alloc]
+      initWithRequireLimitedUseAppCheckTokens:[limitedUseAppCheckToken boolValue]];
+
+  FIRHTTPSCallable *function;
+
+  if (![functionName isEqual:[NSNull null]]) {
+    function = [functions HTTPSCallableWithName:functionName options:options];
+  } else if (![functionUri isEqual:[NSNull null]]) {
+    function = [functions HTTPSCallableWithURL:[NSURL URLWithString:functionUri] options:options];
+  } else {
+    result.error(@"IllegalArgumentException", @"Either functionName or functionUri must be set",
+                 nil, nil);
+    return;
+  }
   if (timeout != nil && ![timeout isEqual:[NSNull null]]) {
     function.timeoutInterval = timeout.doubleValue / 1000;
   }

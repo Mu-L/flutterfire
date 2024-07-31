@@ -15,10 +15,6 @@ class FirebaseAuth extends FirebasePluginPlatform {
   // instance with the default app before a user specifies an app.
   FirebaseAuthPlatform? _delegatePackingProperty;
 
-  // To set "persistence" on web, it is now required on the v9.0.0 or above Firebase JS SDK to pass the value on calling `initializeAuth()`.
-  /// https://firebase.google.com/docs/reference/js/auth.md#initializeauth
-  Persistence? _persistence;
-
   /// Returns the underlying delegate implementation.
   ///
   /// If called and no [_delegatePackingProperty] exists, it will first be
@@ -27,7 +23,6 @@ class FirebaseAuth extends FirebasePluginPlatform {
     _delegatePackingProperty ??= FirebaseAuthPlatform.instanceFor(
       app: app,
       pluginConstants: pluginConstants,
-      persistence: _persistence,
     );
     return _delegatePackingProperty!;
   }
@@ -35,9 +30,8 @@ class FirebaseAuth extends FirebasePluginPlatform {
   /// The [FirebaseApp] for this current Auth instance.
   FirebaseApp app;
 
-  FirebaseAuth._({required this.app, Persistence? persistence})
-      : _persistence = persistence,
-        super(app.name, 'plugins.flutter.io/firebase_auth');
+  FirebaseAuth._({required this.app})
+      : super(app.name, 'plugins.flutter.io/firebase_auth');
 
   /// Returns an instance using the default [FirebaseApp].
   static FirebaseAuth get instance {
@@ -47,11 +41,15 @@ class FirebaseAuth extends FirebasePluginPlatform {
   }
 
   /// Returns an instance using a specified [FirebaseApp].
-  /// Note that persistence can only be used on Web and is not supported on other platforms.
-  factory FirebaseAuth.instanceFor(
-      {required FirebaseApp app, Persistence? persistence}) {
+  factory FirebaseAuth.instanceFor({
+    required FirebaseApp app,
+    @Deprecated(
+      'Will be removed in future release. Use setPersistence() instead.',
+    )
+    Persistence? persistence,
+  }) {
     return _firebaseAuthInstances.putIfAbsent(app.name, () {
-      return FirebaseAuth._(app: app, persistence: persistence);
+      return FirebaseAuth._(app: app);
     });
   }
 
@@ -73,52 +71,7 @@ class FirebaseAuth extends FirebasePluginPlatform {
   ///
   /// See [setLanguageCode] to update the language code.
   String? get languageCode {
-    if (_delegate.languageCode != null) {
-      return _delegate.languageCode;
-    }
-
-    return null;
-  }
-
-  /// Changes this instance to point to an Auth emulator running locally.
-  ///
-  /// Set the [origin] of the local emulator, such as "http://localhost:9099"
-  ///
-  /// Note: Must be called immediately, prior to accessing auth methods.
-  /// Do not use with production credentials as emulator traffic is not encrypted.
-  ///
-  /// Note: auth emulator is not supported for web yet. firebase-js-sdk does not support
-  /// auth.useEmulator until v8.2.4, but FlutterFire does not support firebase-js-sdk v8+ yet
-  @Deprecated(
-    'Will be removed in future release. '
-    'Use useAuthEmulator().',
-  )
-  Future<void> useEmulator(String origin) async {
-    assert(origin.isNotEmpty);
-    String mappedOrigin = origin;
-
-    // Android considers localhost as 10.0.2.2 - automatically handle this for users.
-    if (defaultTargetPlatform == TargetPlatform.android && !kIsWeb) {
-      if (mappedOrigin.startsWith('http://localhost')) {
-        mappedOrigin =
-            mappedOrigin.replaceFirst('http://localhost', 'http://10.0.2.2');
-      } else if (mappedOrigin.startsWith('http://127.0.0.1')) {
-        mappedOrigin =
-            mappedOrigin.replaceFirst('http://127.0.0.1', 'http://10.0.2.2');
-      }
-    }
-
-    // Native calls take the host and port split out
-    final hostPortRegex = RegExp(r'^http:\/\/([\w\d.]+):(\d+)$');
-    final RegExpMatch? match = hostPortRegex.firstMatch(mappedOrigin);
-    if (match == null) {
-      throw ArgumentError('firebase.auth().useEmulator() origin format error');
-    }
-    // Two non-empty groups in RegExp match - which is null-tested - these are non-null now
-    final String host = match.group(1)!;
-    final int port = int.parse(match.group(2)!);
-
-    await useAuthEmulator(host, port);
+    return _delegate.languageCode;
   }
 
   /// Changes this instance to point to an Auth emulator running locally.
@@ -128,11 +81,13 @@ class FirebaseAuth extends FirebasePluginPlatform {
   ///
   /// Note: Must be called immediately, prior to accessing auth methods.
   /// Do not use with production credentials as emulator traffic is not encrypted.
-  Future<void> useAuthEmulator(String host, int port) async {
+  Future<void> useAuthEmulator(String host, int port,
+      {bool automaticHostMapping = true}) async {
     String mappedHost = host;
 
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      if (mappedHost == 'localhost' || mappedHost == '127.0.0.1') {
+      if ((mappedHost == 'localhost' || mappedHost == '127.0.0.1') &&
+          automaticHostMapping) {
         // ignore: avoid_print
         print('Mapping Auth Emulator host "$mappedHost" to "10.0.2.2".');
         mappedHost = '10.0.2.2';
@@ -155,6 +110,35 @@ class FirebaseAuth extends FirebasePluginPlatform {
   /// parent project. By default, this is set to `null`.
   set tenantId(String? tenantId) {
     _delegate.tenantId = tenantId;
+  }
+
+  /// The current Auth instance's custom auth domain.
+  /// The auth domain used to handle redirects from OAuth provides, for example
+  /// "my-awesome-app.firebaseapp.com". By default, this is set to `null` and
+  /// default auth domain is used.
+  ///
+  /// If not `null`, this value will supersede `authDomain` property set in `initializeApp`.
+  String? get customAuthDomain {
+    return _delegate.customAuthDomain;
+  }
+
+  /// Set the current Auth instance's auth domain for apple and android platforms.
+  /// The auth domain used to handle redirects from OAuth provides, for example
+  /// "my-awesome-app.firebaseapp.com". By default, this is set to `null` and
+  /// default auth domain is used.
+  ///
+  /// If not `null`, this value will supersede `authDomain` property set in `initializeApp`.
+  set customAuthDomain(String? customAuthDomain) {
+    // Web and windows do not support setting custom auth domains on the auth instance
+    if (defaultTargetPlatform == TargetPlatform.windows || kIsWeb) {
+      final message = defaultTargetPlatform == TargetPlatform.windows
+          ? 'Cannot set custom auth domain on a FirebaseAuth instance for windows platform'
+          : 'Cannot set custom auth domain on a FirebaseAuth instance. Set the custom auth domain on `FirebaseOptions.authDomain` instance and pass into `Firebase.initializeApp()` instead.';
+      throw UnimplementedError(
+        message,
+      );
+    }
+    _delegate.customAuthDomain = customAuthDomain;
   }
 
   /// Applies a verification code sent to the user by email or other out-of-band
@@ -237,6 +221,19 @@ class FirebaseAuth extends FirebasePluginPlatform {
   ///    email/password accounts in the Firebase Console, under the Auth tab.
   /// - **weak-password**:
   ///  - Thrown if the password is not strong enough.
+  /// - **too-many-requests**:
+  ///  - Thrown if the user sent too many requests at the same time, for security
+  ///     the api will not allow too many attemps at the same time, user will have
+  ///     to wait for some time
+  /// - **user-token-expired**:
+  ///  - Thrown if the user is no longer authenticated since his refresh token
+  ///    has been expired
+  /// - **network-request-failed**:
+  ///  - Thrown if there was a network request error, for example the user don't
+  ///    don't have internet connection
+  /// - **operation-not-allowed**:
+  ///  - Thrown if email/password accounts are not enabled. Enable
+  ///    email/password accounts in the Firebase Console, under the Auth tab.
   Future<UserCredential> createUserWithEmailAndPassword({
     required String email,
     required String password,
@@ -258,6 +255,9 @@ class FirebaseAuth extends FirebasePluginPlatform {
   /// A [FirebaseAuthException] maybe thrown with the following error code:
   /// - **invalid-email**:
   ///  - Thrown if the email address is not valid.
+  @Deprecated('fetchSignInMethodsForEmail() has been deprecated. '
+      'Migrating off of this method is recommended as a security best-practice. Learn more in the Identity Platform documentation: '
+      ' https://cloud.google.com/identity-platform/docs/admin/email-enumeration-protection.')
   Future<List<String>> fetchSignInMethodsForEmail(String email) {
     return _delegate.fetchSignInMethodsForEmail(email);
   }
@@ -331,7 +331,7 @@ class FirebaseAuth extends FirebasePluginPlatform {
   /// - **auth/unauthorized-continue-uri**\
   ///   The domain of the continue URL is not whitelisted. Whitelist the domain in the Firebase console.
   /// - **auth/user-not-found**\
-  ///   Thrown if there is no user corresponding to the email address.
+  ///   Thrown if there is no user corresponding to the email address. Note: This exception is no longer thrown when enabling email enumeration protection.
   Future<void> sendPasswordResetEmail({
     required String email,
     ActionCodeSettings? actionCodeSettings,
@@ -364,18 +364,13 @@ class FirebaseAuth extends FirebasePluginPlatform {
     await _delegate.sendSignInLinkToEmail(email, actionCodeSettings);
   }
 
-  /// When set to null, the default Firebase Console language setting is
-  /// applied.
+  /// When set to null, sets the user-facing language code to be the default app language.
   ///
   /// The language code will propagate to email action templates (password
   /// reset, email verification and email change revocation), SMS templates for
   /// phone authentication, reCAPTCHA verifier and OAuth popup/redirect
   /// operations provided the specified providers support localization with the
   /// language code specified.
-  ///
-  /// On web platforms, if `null` is provided as the [languageCode] the Firebase
-  /// project default language will be used. On native platforms, the device
-  /// language will be used.
   Future<void> setLanguageCode(String? languageCode) {
     return _delegate.setLanguageCode(languageCode);
   }
@@ -417,18 +412,19 @@ class FirebaseAuth extends FirebasePluginPlatform {
   ///   settings > Capabilities). To learn more, visit the
   ///   [Apple documentation](https://developer.apple.com/documentation/security/keychain_services/keychain_items/sharing_access_to_keychain_items_among_a_collection_of_apps).
   Future<void> setSettings({
-    bool? appVerificationDisabledForTesting,
+    bool appVerificationDisabledForTesting = false,
     String? userAccessGroup,
     String? phoneNumber,
     String? smsCode,
     bool? forceRecaptchaFlow,
   }) {
     return _delegate.setSettings(
-        appVerificationDisabledForTesting: appVerificationDisabledForTesting,
-        userAccessGroup: userAccessGroup,
-        phoneNumber: phoneNumber,
-        smsCode: smsCode,
-        forceRecaptchaFlow: forceRecaptchaFlow);
+      appVerificationDisabledForTesting: appVerificationDisabledForTesting,
+      userAccessGroup: userAccessGroup,
+      phoneNumber: phoneNumber,
+      smsCode: smsCode,
+      forceRecaptchaFlow: forceRecaptchaFlow,
+    );
   }
 
   /// Changes the current type of persistence on the current Auth instance for
@@ -485,6 +481,7 @@ class FirebaseAuth extends FirebasePluginPlatform {
   /// - **account-exists-with-different-credential**:
   ///  - Thrown if there already exists an account with the email address
   ///    asserted by the credential.
+  // ignore: deprecated_member_use_from_same_package
   ///    Resolve this by calling [fetchSignInMethodsForEmail] and then asking
   ///    the user to sign in using one of the returned providers.
   ///    Once the user is signed in, the original credential can be linked to
@@ -574,6 +571,24 @@ class FirebaseAuth extends FirebasePluginPlatform {
   /// - **wrong-password**:
   ///  - Thrown if the password is invalid for the given email, or the account
   ///    corresponding to the email does not have a password set.
+  /// - **too-many-requests**:
+  ///  - Thrown if the user sent too many requests at the same time, for security
+  ///     the api will not allow too many attemps at the same time, user will have
+  ///     to wait for some time
+  /// - **user-token-expired**:
+  ///  - Thrown if the user is no longer authenticated since his refresh token
+  ///    has been expired
+  /// - **network-request-failed**:
+  ///  - Thrown if there was a network request error, for example the user don't
+  ///    don't have internet connection
+  /// - **INVALID_LOGIN_CREDENTIALS** or **invalid-credential**:
+  ///  - Thrown if the password is invalid for the given email, or the account
+  ///    corresponding to the email does not have a password set.
+  ///    depending on if you are using firebase emulator or not the code is
+  ///    different
+  /// - **operation-not-allowed**:
+  ///  - Thrown if email/password accounts are not enabled. Enable
+  ///    email/password accounts in the Firebase Console, under the Auth tab.
   Future<UserCredential> signInWithEmailAndPassword({
     required String email,
     required String password,
@@ -619,19 +634,6 @@ class FirebaseAuth extends FirebasePluginPlatform {
     } catch (e) {
       rethrow;
     }
-  }
-
-  /// Signs in with an AuthProvider using native authentication flow. This is
-  /// deprecated in favor of `signInWithProvider()`.
-  ///
-  /// A [FirebaseAuthException] maybe thrown with the following error code:
-  /// - **user-disabled**:
-  ///  - Thrown if the user corresponding to the given email has been disabled.
-  @Deprecated('You should use signInWithProvider instead')
-  Future<UserCredential> signInWithAuthProvider(
-    AuthProvider provider,
-  ) async {
-    return signInWithProvider(provider);
   }
 
   /// Signs in with an AuthProvider using native authentication flow.
@@ -818,6 +820,12 @@ class FirebaseAuth extends FirebasePluginPlatform {
       autoRetrievedSmsCodeForTesting: autoRetrievedSmsCodeForTesting,
       multiFactorSession: multiFactorSession,
     );
+  }
+
+  /// Apple only. Users signed in with Apple provider can revoke their token using an authorization code.
+  /// Authorization code can be retrieved on the user credential i.e. userCredential.additionalUserInfo.authorizationCode
+  Future<void> revokeTokenWithAuthorizationCode(String authorizationCode) {
+    return _delegate.revokeTokenWithAuthorizationCode(authorizationCode);
   }
 
   @override

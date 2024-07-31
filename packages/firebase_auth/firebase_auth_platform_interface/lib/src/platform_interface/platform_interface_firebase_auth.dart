@@ -33,6 +33,14 @@ abstract class FirebaseAuthPlatform extends PlatformInterface {
   /// parent project. By default, this is set to `null`.
   String? tenantId;
 
+  /// Set the current Auth instance's auth domain for apple and android platforms.
+  /// The auth domain used to handle redirects from OAuth provides, for example
+  /// "my-awesome-app.firebaseapp.com". By default, this is set to `null` and
+  /// default auth domain is used.
+  ///
+  /// If not `null`, this value will supersede `authDomain` property set in `initializeApp`.
+  String? customAuthDomain;
+
   /// Create an instance using [app]
   FirebaseAuthPlatform({this.appInstance}) : super(token: _token);
 
@@ -48,18 +56,22 @@ abstract class FirebaseAuthPlatform extends PlatformInterface {
   static final Object _token = Object();
 
   /// Create an instance using [app] using the existing implementation
-  factory FirebaseAuthPlatform.instanceFor(
-      {required FirebaseApp app,
-      required Map<dynamic, dynamic> pluginConstants,
-      Persistence? persistence}) {
-    return FirebaseAuthPlatform.instance
-        .delegateFor(app: app, persistence: persistence)
-        .setInitialValues(
-            languageCode: pluginConstants['APP_LANGUAGE_CODE'],
-            currentUser: pluginConstants['APP_CURRENT_USER'] == null
-                ? null
-                : Map<String, dynamic>.from(
-                    pluginConstants['APP_CURRENT_USER']));
+  factory FirebaseAuthPlatform.instanceFor({
+    required FirebaseApp app,
+    required Map<dynamic, dynamic> pluginConstants,
+  }) {
+    var currentUser = pluginConstants['APP_CURRENT_USER'];
+
+    if (currentUser != null) {
+      currentUser as List<Object?>;
+      final firstElement = PigeonUserInfo.decode(currentUser[0]!);
+      final secondElement = currentUser[1]!;
+      currentUser = PigeonUserDetails.decode([firstElement, secondElement]);
+    }
+    return FirebaseAuthPlatform.instance.delegateFor(app: app).setInitialValues(
+          languageCode: pluginConstants['APP_LANGUAGE_CODE'],
+          currentUser: currentUser,
+        );
   }
 
   /// The current default [FirebaseAuthPlatform] instance.
@@ -84,8 +96,7 @@ abstract class FirebaseAuthPlatform extends PlatformInterface {
   ///
   /// Setting a [persistence] type is only available on web based platforms.
   @protected
-  FirebaseAuthPlatform delegateFor(
-      {required FirebaseApp app, Persistence? persistence}) {
+  FirebaseAuthPlatform delegateFor({required FirebaseApp app}) {
     throw UnimplementedError('delegateFor() is not implemented');
   }
 
@@ -96,7 +107,7 @@ abstract class FirebaseAuthPlatform extends PlatformInterface {
   /// calls.
   @protected
   FirebaseAuthPlatform setInitialValues({
-    Map<String, dynamic>? currentUser,
+    PigeonUserDetails? currentUser,
     String? languageCode,
   }) {
     throw UnimplementedError('setInitialValues() is not implemented');
@@ -217,6 +228,19 @@ abstract class FirebaseAuthPlatform extends PlatformInterface {
   ///    email/password accounts in the Firebase Console, under the Auth tab.
   /// - **weak-password**:
   ///  - Thrown if the password is not strong enough.
+  /// - **too-many-requests**:
+  ///  - Thrown if the user sent too many requests at the same time, for security
+  ///     the api will not allow too many attemps at the same time, user will have
+  ///     to wait for some time
+  /// - **user-token-expired**:
+  ///  - Thrown if the user is no longer authenticated since his refresh token
+  ///    has been expired
+  /// - **network-request-failed**:
+  ///  - Thrown if there was a network request error, for example the user don't
+  ///    don't have internet connection
+  /// - **operation-not-allowed**:
+  ///  - Thrown if email/password accounts are not enabled. Enable
+  ///    email/password accounts in the Firebase Console, under the Auth tab.
   Future<UserCredentialPlatform> createUserWithEmailAndPassword(
     String email,
     String password,
@@ -366,7 +390,7 @@ abstract class FirebaseAuthPlatform extends PlatformInterface {
   ///   settings > Capabilities). To learn more, visit the
   ///   [Apple documentation](https://developer.apple.com/documentation/security/keychain_services/keychain_items/sharing_access_to_keychain_items_among_a_collection_of_apps).
   Future<void> setSettings({
-    bool? appVerificationDisabledForTesting,
+    bool appVerificationDisabledForTesting = false,
     String? userAccessGroup,
     String? phoneNumber,
     String? smsCode,
@@ -495,6 +519,24 @@ abstract class FirebaseAuthPlatform extends PlatformInterface {
   /// - **wrong-password**:
   ///  - Thrown if the password is invalid for the given email, or the account
   ///    corresponding to the email does not have a password set.
+  /// - **too-many-requests**:
+  ///  - Thrown if the user sent too many requests at the same time, for security
+  ///     the api will not allow too many attemps at the same time, user will have
+  ///     to wait for some time
+  /// - **user-token-expired**:
+  ///  - Thrown if the user is no longer authenticated since his refresh token
+  ///    has been expired
+  /// - **network-request-failed**:
+  ///  - Thrown if there was a network request error, for example the user don't
+  ///    don't have internet connection
+  /// - **INVALID_LOGIN_CREDENTIALS** or **invalid-credential**:
+  ///  - Thrown if the password is invalid for the given email, or the account
+  ///    corresponding to the email does not have a password set.
+  ///    depending on if you are using firebase emulator or not the code is
+  ///    different
+  /// - **operation-not-allowed**:
+  ///  - Thrown if email/password accounts are not enabled. Enable
+  ///    email/password accounts in the Firebase Console, under the Auth tab.
   Future<UserCredentialPlatform> signInWithEmailAndPassword(
     String email,
     String password,
@@ -656,5 +698,12 @@ abstract class FirebaseAuthPlatform extends PlatformInterface {
     @visibleForTesting String? autoRetrievedSmsCodeForTesting,
   }) {
     throw UnimplementedError('verifyPhoneNumber() is not implemented');
+  }
+
+  /// Apple only. Users signed in with Apple provider can revoke their token using an authorization code.
+  /// Authorization code can be retrieved on the user credential i.e. userCredential.additionalUserInfo.authorizationCode
+  Future<void> revokeTokenWithAuthorizationCode(String authorizationCode) {
+    throw UnimplementedError(
+        'revokeTokenWithAuthorizationCode() is not implemented');
   }
 }

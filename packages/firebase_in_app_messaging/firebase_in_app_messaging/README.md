@@ -8,7 +8,7 @@ To learn more about Firebase In-App Messaging, please visit the [Firebase websit
 
 ## Getting Started
 
-To get started with Firebase In-App Messaging for Flutter, please [see the documentation](https://firebase.flutter.dev/docs/in-app-messaging/overview).
+To get started with Firebase In-App Messaging for Flutter, please [see the documentation](https://firebase.google.com/docs/in-app-messaging/get-started?platform=flutter).
 
 ## Usage
 
@@ -21,5 +21,5 @@ Please file FlutterFire specific issues, bugs, or feature requests in our [issue
 Plugin issues that are not specific to FlutterFire can be filed in the [Flutter issue tracker](https://github.com/flutter/flutter/issues/new).
 
 To contribute a change to this plugin,
-please review our [contribution guide](https://github.com/firebase/flutterfire/blob/master/CONTRIBUTING.md)
+please review our [contribution guide](https://github.com/firebase/flutterfire/blob/main/CONTRIBUTING.md)
 and open a [pull request](https://github.com/firebase/flutterfire/pulls).

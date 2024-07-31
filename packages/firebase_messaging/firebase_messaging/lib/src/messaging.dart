@@ -87,6 +87,9 @@ class FirebaseMessaging extends FirebasePluginPlatform {
   /// This should be used to determine whether specific notification interaction
   /// should open the app with a specific purpose (e.g. opening a chat message,
   /// specific screen etc).
+  ///
+  /// on Android, if the message was received in the foreground, and the notification was
+  /// pressed whilst the app is in a background/terminated state, this will return `null`.
   Future<RemoteMessage?> getInitialMessage() {
     return _delegate.getInitialMessage();
   }
@@ -203,6 +206,9 @@ class FirebaseMessaging extends FirebasePluginPlatform {
   }
 
   /// Send a new [RemoteMessage] to the FCM server. Android only.
+  /// Firebase will decommission in June 2024: https://firebase.google.com/docs/reference/android/com/google/firebase/messaging/FirebaseMessaging#send
+  @Deprecated(
+      'This will be removed in a future release. Firebase will decommission in June 2024')
   Future<void> sendMessage({
     String? to,
     Map<String, String>? data,

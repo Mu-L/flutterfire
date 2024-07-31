@@ -4,16 +4,18 @@
 // found in the LICENSE file.
 
 import 'dart:async';
+import 'dart:js_interop';
 
 import 'package:firebase_auth_platform_interface/firebase_auth_platform_interface.dart';
 import 'package:firebase_auth_web/src/firebase_auth_web_multi_factor.dart';
-import 'package:firebase_auth_web/src/interop/utils/utils.dart';
 import 'package:firebase_auth_web/src/utils/web_utils.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_core_web/firebase_core_web.dart';
 import 'package:firebase_core_web/firebase_core_web_interop.dart'
     as core_interop;
+import 'package:flutter/foundation.dart';
 import 'package:flutter_web_plugins/flutter_web_plugins.dart';
+import 'package:web/web.dart' as web;
 
 import 'src/firebase_auth_web_confirmation_result.dart';
 import 'src/firebase_auth_web_recaptcha_verifier_factory.dart';
@@ -21,6 +23,8 @@ import 'src/firebase_auth_web_user.dart';
 import 'src/firebase_auth_web_user_credential.dart';
 import 'src/interop/auth.dart' as auth_interop;
 import 'src/interop/multi_factor.dart' as multi_factor;
+
+enum StateListener { authStateChange, userStateChange, idTokenChange }
 
 /// The web delegate implementation for [FirebaseAuth].
 class FirebaseAuthWeb extends FirebaseAuthPlatform {
@@ -32,68 +36,51 @@ class FirebaseAuthWeb extends FirebaseAuthPlatform {
 
   Completer<void> _initialized = Completer();
 
-  // To set "persistence" on web, it is now required on the v9.0.0 or above Firebase JS SDK to pass the value on calling `initializeAuth()`.
-  // https://firebase.google.com/docs/reference/js/auth.md#initializeauth
-  Persistence? _persistence;
-
   /// The entry point for the [FirebaseAuthWeb] class.
-  FirebaseAuthWeb({required FirebaseApp app, Persistence? persistence})
-      : super(appInstance: app) {
-    _persistence = persistence;
+  FirebaseAuthWeb({required FirebaseApp app}) : super(appInstance: app) {
     // Create a app instance broadcast stream for both delegate listener events
-    _userChangesListeners[app.name] =
-        StreamController<UserPlatform?>.broadcast();
-    _authStateChangesListeners[app.name] =
-        StreamController<UserPlatform?>.broadcast();
-    _idTokenChangesListeners[app.name] =
-        StreamController<UserPlatform?>.broadcast();
-
-    // TODO(rrousselGit): close StreamSubscription
-    delegate.onAuthStateChanged.map((auth_interop.User? webUser) {
-      if (!_initialized.isCompleted) {
-        _initialized.complete();
-      }
-
-      if (webUser == null) {
-        return null;
-      } else {
-        return UserWeb(
-          this,
-          MultiFactorWeb(this, multi_factor.multiFactor(webUser)),
-          webUser,
-          _webAuth,
-        );
-      }
-    }).listen((UserWeb? webUser) {
-      _authStateChangesListeners[app.name]!.add(webUser);
-    });
-
-    // TODO(rrousselGit): close StreamSubscription
-    // Also triggers `userChanged` events
-    delegate.onIdTokenChanged.map((auth_interop.User? webUser) {
-      if (webUser == null) {
-        return null;
-      } else {
-        return UserWeb(
-          this,
-          MultiFactorWeb(this, multi_factor.multiFactor(webUser)),
-          webUser,
-          _webAuth,
-        );
-      }
-    }).listen((UserWeb? webUser) {
-      _idTokenChangesListeners[app.name]!.add(webUser);
-      _userChangesListeners[app.name]!.add(webUser);
-    });
+    _createStreamListener(app.name, StateListener.authStateChange);
+    _createStreamListener(app.name, StateListener.idTokenChange);
+    _createStreamListener(app.name, StateListener.userStateChange);
   }
 
   /// Called by PluginRegistry to register this plugin for Flutter Web
   static void registerWith(Registrar registrar) {
-    FirebaseCoreWeb.registerService('auth', () async {
-      await FirebaseAuthWeb.instance.delegate.onWaitInitState();
-    });
+    FirebaseCoreWeb.registerService(
+      'auth',
+      ensurePluginInitialized: (firebaseApp) async {
+        final authDelegate = auth_interop.getAuthInstance(firebaseApp);
+        // if localhost, and emulator was previously set in localStorage, use it
+        if (web.window.location.hostname == 'localhost' && kDebugMode) {
+          final String? emulatorOrigin = web.window.sessionStorage
+              .getItem(getOriginName(firebaseApp.name));
+
+          if (emulatorOrigin != null) {
+            try {
+              authDelegate.useAuthEmulator(emulatorOrigin);
+              // ignore: avoid_print
+              print(
+                'Using previously configured Auth emulator at $emulatorOrigin for ${firebaseApp.name} \nTo switch back to production, restart your app with the emulator turned off.',
+              );
+            } catch (e) {
+              if (e.toString().contains('sooner')) {
+                // Happens during hot reload when the emulator is already configured
+                // ignore: avoid_print
+                print(
+                  'Auth emulator is already configured at $emulatorOrigin for ${firebaseApp.name} and kept across hot reload.\nTo switch back to production, restart your app with the emulator turned off.',
+                );
+              } else {
+                rethrow;
+              }
+            }
+          }
+        }
+        await authDelegate.onWaitInitState();
+      },
+    );
     FirebaseAuthPlatform.instance = FirebaseAuthWeb.instance;
     PhoneMultiFactorGeneratorPlatform.instance = PhoneMultiFactorGeneratorWeb();
+    TotpMultiFactorGeneratorPlatform.instance = TotpMultiFactorGeneratorWeb();
     RecaptchaVerifierFactoryPlatform.instance =
         RecaptchaVerifierFactoryWeb.instance;
   }
@@ -112,25 +99,122 @@ class FirebaseAuthWeb extends FirebaseAuthPlatform {
     return FirebaseAuthWeb._();
   }
 
+  bool _cancelUserStream = false;
+  bool _cancelIdTokenStream = false;
+
+  void _createStreamListener(String appName, StateListener stateListener) {
+    switch (stateListener) {
+      case StateListener.authStateChange:
+        _authStateChangesListeners[appName] =
+            StreamController<UserPlatform?>.broadcast(
+          onCancel: () {
+            _authStateChangesListeners[appName]!.close();
+            _authStateChangesListeners.remove(appName);
+            delegate.authStateController?.close();
+          },
+        );
+        delegate.onAuthStateChanged.map((auth_interop.User? webUser) {
+          if (!_initialized.isCompleted) {
+            _initialized.complete();
+          }
+
+          if (webUser == null) {
+            return null;
+          } else {
+            return UserWeb(
+              this,
+              MultiFactorWeb(this, multi_factor.multiFactor(webUser)),
+              webUser,
+              _webAuth,
+            );
+          }
+        }).listen((UserWeb? webUser) {
+          _authStateChangesListeners[app.name]!.add(webUser);
+        });
+        break;
+      case StateListener.idTokenChange:
+        _cancelIdTokenStream = false;
+        _idTokenChangesListeners[appName] =
+            StreamController<UserPlatform?>.broadcast(
+          onCancel: () {
+            if (_userChangesListeners[appName] == null) {
+              // We cannot remove if there is a userChanges listener as we use this stream for it
+              _idTokenChangesListeners[appName]!.close();
+              _idTokenChangesListeners.remove(appName);
+              delegate.idTokenController?.close();
+            } else {
+              // We need to do this because if idTokenListener and userChanges are being listened to
+              // We need to cancel both at the same time otherwise neither will be closed & removed
+              _cancelIdTokenStream = true;
+            }
+
+            if (_cancelUserStream) {
+              _userChangesListeners[appName]!.close();
+              _userChangesListeners.remove(appName);
+            }
+          },
+        );
+
+        // Also triggers `userChanged` events
+        delegate.onIdTokenChanged.map((auth_interop.User? webUser) {
+          if (webUser == null) {
+            return null;
+          } else {
+            return UserWeb(
+              this,
+              MultiFactorWeb(this, multi_factor.multiFactor(webUser)),
+              webUser,
+              _webAuth,
+            );
+          }
+        }).listen((UserWeb? webUser) {
+          _idTokenChangesListeners[app.name]!.add(webUser);
+          _userChangesListeners[app.name]!.add(webUser);
+        });
+        break;
+      case StateListener.userStateChange:
+        _cancelUserStream = false;
+        _userChangesListeners[appName] =
+            StreamController<UserPlatform?>.broadcast(
+          onCancel: () {
+            if (_idTokenChangesListeners[appName] == null) {
+              _userChangesListeners[appName]!.close();
+              _userChangesListeners.remove(appName);
+              // There is no delegate for userChanges as we use idTokenChanges
+            } else {
+              _cancelUserStream = true;
+            }
+
+            if (_cancelIdTokenStream) {
+              // We need to do this because if idTokenListener and userChanges are being listened to
+              // We need to cancel both at the same time otherwise neither will be closed & removed
+              _idTokenChangesListeners[appName]!.close();
+              _idTokenChangesListeners.remove(appName);
+              delegate.idTokenController?.close();
+            }
+          },
+        );
+        break;
+    }
+  }
+
   /// instance of Auth from the web plugin
   auth_interop.Auth? _webAuth;
 
   auth_interop.Auth get delegate {
-    _webAuth ??= auth_interop.getAuthInstance(core_interop.app(app.name),
-        persistence: _persistence);
+    _webAuth ??= auth_interop.getAuthInstance(core_interop.app(app.name));
 
     return _webAuth!;
   }
 
   @override
-  FirebaseAuthPlatform delegateFor(
-      {required FirebaseApp app, Persistence? persistence}) {
-    return FirebaseAuthWeb(app: app, persistence: persistence);
+  FirebaseAuthPlatform delegateFor({required FirebaseApp app}) {
+    return FirebaseAuthWeb(app: app);
   }
 
   @override
   FirebaseAuthWeb setInitialValues({
-    Map<String, dynamic>? currentUser,
+    PigeonUserDetails? currentUser,
     String? languageCode,
   }) {
     // Values are already set on web
@@ -172,71 +256,67 @@ class FirebaseAuthWeb extends FirebaseAuthPlatform {
 
   @override
   Future<void> applyActionCode(String code) async {
-    try {
-      await delegate.applyActionCode(code);
-    } catch (e) {
-      throw getFirebaseAuthException(e);
-    }
+    await guardAuthExceptions(
+      () => delegate.applyActionCode(code),
+    );
   }
 
   @override
   Future<ActionCodeInfo> checkActionCode(String code) async {
-    try {
-      return convertWebActionCodeInfo(await delegate.checkActionCode(code))!;
-    } catch (e) {
-      throw getFirebaseAuthException(e);
-    }
+    final actionCode = await guardAuthExceptions(
+      () => delegate.checkActionCode(code),
+    );
+
+    return convertWebActionCodeInfo(actionCode)!;
   }
 
   @override
   Future<void> confirmPasswordReset(String code, String newPassword) async {
-    try {
-      await delegate.confirmPasswordReset(code, newPassword);
-    } catch (e) {
-      throw getFirebaseAuthException(e);
-    }
+    return guardAuthExceptions(
+      () => delegate.confirmPasswordReset(code, newPassword),
+    );
   }
 
   @override
   Future<UserCredentialPlatform> createUserWithEmailAndPassword(
       String email, String password) async {
-    try {
-      return UserCredentialWeb(
-        this,
-        await delegate.createUserWithEmailAndPassword(email, password),
-        _webAuth,
-      );
-    } catch (e) {
-      throw getFirebaseAuthException(e);
-    }
+    final userCredential = await guardAuthExceptions(
+      () => delegate.createUserWithEmailAndPassword(email, password),
+    );
+
+    return UserCredentialWeb(
+      this,
+      userCredential,
+      _webAuth,
+    );
   }
 
   @override
   Future<List<String>> fetchSignInMethodsForEmail(String email) async {
-    try {
-      return await delegate.fetchSignInMethodsForEmail(email);
-    } catch (e) {
-      throw getFirebaseAuthException(e);
-    }
+    return guardAuthExceptions(
+      () => delegate.fetchSignInMethodsForEmail(email),
+    );
   }
 
   @override
   Future<UserCredentialPlatform> getRedirectResult() async {
-    try {
-      return UserCredentialWeb(
-        this,
-        await delegate.getRedirectResult(),
-        _webAuth,
-      );
-    } catch (e) {
-      throw getFirebaseAuthException(e);
-    }
+    final userCredential =
+        await guardAuthExceptions(delegate.getRedirectResult);
+
+    return UserCredentialWeb(
+      this,
+      userCredential,
+      _webAuth,
+    );
   }
 
   @override
   Stream<UserPlatform?> authStateChanges() async* {
     await _initialized.future;
     yield currentUser;
+    if (_authStateChangesListeners[app.name] == null) {
+      _createStreamListener(app.name, StateListener.authStateChange);
+    }
     yield* _authStateChangesListeners[app.name]!.stream;
   }
 
@@ -244,6 +324,9 @@ class FirebaseAuthWeb extends FirebaseAuthPlatform {
   Stream<UserPlatform?> idTokenChanges() async* {
     await _initialized.future;
     yield currentUser;
+    if (_idTokenChangesListeners[app.name] == null) {
+      _createStreamListener(app.name, StateListener.idTokenChange);
+    }
     yield* _idTokenChangesListeners[app.name]!.stream;
   }
 
@@ -251,6 +334,9 @@ class FirebaseAuthWeb extends FirebaseAuthPlatform {
   Stream<UserPlatform?> userChanges() async* {
     await _initialized.future;
     yield currentUser;
+    if (_userChangesListeners[app.name] == null) {
+      _createStreamListener(app.name, StateListener.userStateChange);
+    }
     yield* _userChangesListeners[app.name]!.stream;
   }
 
@@ -259,12 +345,14 @@ class FirebaseAuthWeb extends FirebaseAuthPlatform {
     String email, [
     ActionCodeSettings? actionCodeSettings,
   ]) async {
-    try {
-      await delegate.sendPasswordResetEmail(
-          email, convertPlatformActionCodeSettings(actionCodeSettings));
-    } catch (e) {
-      throw getFirebaseAuthException(e);
-    }
+    return guardAuthExceptions(
+      () => delegate.sendPasswordResetEmail(
+        email,
+        convertPlatformActionCodeSettings(
+          actionCodeSettings,
+        ),
+      ),
+    );
   }
 
   @override
@@ -272,22 +360,28 @@ class FirebaseAuthWeb extends FirebaseAuthPlatform {
     String email, [
     ActionCodeSettings? actionCodeSettings,
   ]) async {
-    try {
-      await delegate.sendSignInLinkToEmail(
-          email, convertPlatformActionCodeSettings(actionCodeSettings));
-    } catch (e) {
-      throw getFirebaseAuthException(e);
-    }
+    return guardAuthExceptions(
+      () => delegate.sendSignInLinkToEmail(
+        email,
+        convertPlatformActionCodeSettings(
+          actionCodeSettings,
+        ),
+      ),
+    );
   }
 
   @override
   String get languageCode {
-    return delegate.languageCode;
+    return delegate.languageCode ?? 'en';
   }
 
   @override
   Future<void> setLanguageCode(String? languageCode) async {
-    delegate.languageCode = languageCode;
+    if (languageCode == null) {
+      delegate.useDeviceLanguage();
+    } else {
+      delegate.languageCode = languageCode;
+    }
   }
 
   @override
@@ -299,86 +393,91 @@ class FirebaseAuthWeb extends FirebaseAuthPlatform {
     bool? forceRecaptchaFlow,
   }) async {
     delegate.settings.appVerificationDisabledForTesting =
-        appVerificationDisabledForTesting;
+        appVerificationDisabledForTesting?.toJS;
   }
 
   @override
   Future<void> setPersistence(Persistence persistence) async {
-    try {
-      return delegate.setPersistence(persistence);
-    } catch (e) {
-      throw getFirebaseAuthException(e);
-    }
+    return guardAuthExceptions(
+      () => delegate.setPersistence(
+        persistence,
+      ),
+    );
   }
 
   @override
   Future<UserCredentialPlatform> signInAnonymously() async {
-    try {
-      return UserCredentialWeb(
-        this,
-        await delegate.signInAnonymously(),
-        _webAuth,
-      );
-    } catch (e) {
-      throw getFirebaseAuthException(e, _webAuth);
-    }
+    final userCredential = await guardAuthExceptions(
+      delegate.signInAnonymously,
+      auth: _webAuth,
+    );
+
+    return UserCredentialWeb(
+      this,
+      userCredential,
+      _webAuth,
+    );
   }
 
   @override
   Future<UserCredentialPlatform> signInWithCredential(
     AuthCredential credential,
   ) async {
-    try {
-      return UserCredentialWeb(
-        this,
-        await delegate
-            .signInWithCredential(convertPlatformCredential(credential)!),
-        _webAuth,
-      );
-    } catch (e) {
-      throw getFirebaseAuthException(e, _webAuth);
-    }
+    final authCredential = await guardAuthExceptions(
+      () =>
+          delegate.signInWithCredential(convertPlatformCredential(credential)!),
+      auth: _webAuth,
+    );
+
+    return UserCredentialWeb(
+      this,
+      authCredential,
+      _webAuth,
+    );
   }
 
   @override
   Future<UserCredentialPlatform> signInWithCustomToken(String token) async {
-    try {
-      return UserCredentialWeb(
-        this,
-        await delegate.signInWithCustomToken(token),
-        _webAuth,
-      );
-    } catch (e) {
-      throw getFirebaseAuthException(e, _webAuth);
-    }
+    final userCredential = await guardAuthExceptions(
+      () => delegate.signInWithCustomToken(token),
+      auth: _webAuth,
+    );
+
+    return UserCredentialWeb(
+      this,
+      userCredential,
+      _webAuth,
+    );
   }
 
   @override
   Future<UserCredentialPlatform> signInWithEmailAndPassword(
       String email, String password) async {
-    try {
-      return UserCredentialWeb(
-        this,
-        await delegate.signInWithEmailAndPassword(email, password),
-        _webAuth,
-      );
-    } catch (e) {
-      throw getFirebaseAuthException(e, _webAuth);
-    }
+    final userCredential = await guardAuthExceptions(
+      () => delegate.signInWithEmailAndPassword(email, password),
+      auth: _webAuth,
+    );
+
+    return UserCredentialWeb(
+      this,
+      userCredential,
+      _webAuth,
+    );
   }
 
   @override
   Future<UserCredentialPlatform> signInWithEmailLink(
       String email, String emailLink) async {
-    try {
-      return UserCredentialWeb(
-        this,
-        await delegate.signInWithEmailLink(email, emailLink),
-        _webAuth,
-      );
-    } catch (e) {
-      throw getFirebaseAuthException(e, _webAuth);
-    }
+    final userCredential = await guardAuthExceptions(
+      () => delegate.signInWithEmailLink(email, emailLink),
+      auth: _webAuth,
+    );
+
+    return UserCredentialWeb(
+      this,
+      userCredential,
+      _webAuth,
+    );
   }
 
   @override
@@ -386,74 +485,98 @@ class FirebaseAuthWeb extends FirebaseAuthPlatform {
     String phoneNumber,
     RecaptchaVerifierFactoryPlatform applicationVerifier,
   ) async {
-    try {
-      // Do not inline - type is not inferred & error is thrown.
-      auth_interop.RecaptchaVerifier verifier = applicationVerifier.delegate;
+    // Do not inline - type is not inferred & error is thrown.
+    auth_interop.RecaptchaVerifier verifier = applicationVerifier.delegate;
 
-      return ConfirmationResultWeb(
-        this,
-        await delegate.signInWithPhoneNumber(phoneNumber, verifier),
-        _webAuth,
-      );
-    } catch (e) {
-      throw getFirebaseAuthException(e, _webAuth);
-    }
+    final confirmationResult = await guardAuthExceptions(
+      () => delegate.signInWithPhoneNumber(
+        phoneNumber,
+        verifier,
+      ),
+    );
+    return ConfirmationResultWeb(
+      this,
+      confirmationResult,
+      _webAuth,
+    );
   }
 
   @override
   Future<UserCredentialPlatform> signInWithPopup(AuthProvider provider) async {
-    try {
-      return UserCredentialWeb(
-        this,
-        await delegate.signInWithPopup(convertPlatformAuthProvider(provider)),
-        _webAuth,
-      );
-    } catch (e) {
-      throw getFirebaseAuthException(e, _webAuth);
-    }
+    final userCredential = await guardAuthExceptions(
+      () => delegate.signInWithPopup(
+        convertPlatformAuthProvider(provider),
+      ),
+      auth: _webAuth,
+    );
+
+    return UserCredentialWeb(
+      this,
+      userCredential,
+      _webAuth,
+    );
   }
 
   @override
   Future<void> signInWithRedirect(AuthProvider provider) async {
-    try {
-      return delegate.signInWithRedirect(convertPlatformAuthProvider(provider));
-    } catch (e) {
-      throw getFirebaseAuthException(e, _webAuth);
-    }
+    return guardAuthExceptions(
+      () => delegate.signInWithRedirect(
+        convertPlatformAuthProvider(provider),
+      ),
+      auth: _webAuth,
+    );
   }
 
   @override
   Future<void> signOut() async {
-    try {
-      await delegate.signOut();
-    } catch (e) {
-      throw getFirebaseAuthException(e);
-    }
+    return guardAuthExceptions(delegate.signOut);
   }
 
   @override
   Future<void> useAuthEmulator(String host, int port) async {
     try {
+      // Get current session storage value
+      final String? emulatorOrigin =
+          web.window.sessionStorage.getItem(getOriginName(delegate.app.name));
+
       // The generic platform interface is with host and port split to
       // centralize logic between android/ios native, but web takes the
       // origin as a single string
-      delegate.useAuthEmulator('http://$host:$port');
+      final String origin = 'http://$host:$port';
+
+      if (origin == emulatorOrigin) {
+        // If the origin is the same as the current one, do nothing
+        // The emulator was already started at the app start
+        return;
+      }
+
+      delegate.useAuthEmulator(origin);
+      // Save to session storage so that the emulator is used on refresh
+      // only in debug mode
+      if (kDebugMode) {
+        web.window.sessionStorage
+            .setItem(getOriginName(delegate.app.name), origin);
+      }
     } catch (e) {
-      final String code = (e as auth_interop.AuthError).code;
-      // this catches Firebase Error from web that occurs after hot reloading & hot restarting
-      if (code != 'auth/emulator-config-failed') {
-        throw getFirebaseAuthException(e);
+      // Cannot be done with 3.2 constraints
+      // ignore: invalid_runtime_check_with_js_interop_types
+      if (e is auth_interop.AuthError) {
+        final String code = e.code.toDart;
+        // this catches Firebase Error from web that occurs after hot reloading & hot restarting
+        if (code != 'auth/emulator-config-failed') {
+          throw getFirebaseAuthException(e);
+        }
+      } else {
+        rethrow;
       }
     }
   }
 
   @override
   Future<String> verifyPasswordResetCode(String code) async {
-    try {
-      return await delegate.verifyPasswordResetCode(code);
-    } catch (e) {
-      throw getFirebaseAuthException(e);
-    }
+    return guardAuthExceptions(
+      () => delegate.verifyPasswordResetCode(code),
+    );
   }
 
   @override
@@ -495,12 +618,24 @@ class FirebaseAuthWeb extends FirebaseAuthPlatform {
       ).delegate;
 
       /// We add the passthrough method for LegacyJsObject
-      final verificationId = await provider.verifyPhoneNumber(
-          jsify(phoneOptions, (object) => object), verifier);
+      final verificationId =
+          await provider.verifyPhoneNumber(phoneOptions.jsify(), verifier);
 
       codeSent(verificationId, null);
     } catch (e) {
       verificationFailed(getFirebaseAuthException(e));
     }
   }
+
+  @override
+  Future<void> revokeTokenWithAuthorizationCode(
+      String authorizationCode) async {
+    throw UnimplementedError(
+      'revokeTokenWithAuthorizationCode() is only available on apple platforms.',
+    );
+  }
+}
+
+String getOriginName(String appName) {
+  return '$appName-firebaseEmulatorOrigin';
 }

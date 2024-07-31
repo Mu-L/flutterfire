@@ -32,7 +32,8 @@ is not supported on Flutter.
  See [Authenticating Your Client](https://developers.google.com/android/guides/client-auth)
   for information about finding your app's SHA-256 hash.
 1. **iOS**: In Xcode, [enable push notifications](http://help.apple.com/xcode/mac/current/#/devdfd3d04a1) for your project & ensure
-   your APNs authentication key is [configured with Firebase Cloud Messaging (FCM)](/docs/cloud-messaging/ios/certs).
+   your APNs authentication key is [configured with Firebase Cloud Messaging (FCM)](/docs/cloud-messaging/ios/certs). Additionally, you must
+   [enable background modes](https://help.apple.com/xcode/mac/current/#/deve49d0ba96) for remote notifications.
    To view an in-depth explanation of this step, view the [Firebase iOS Phone Auth](/docs/auth/ios/phone-auth) documentation.
 1. **Web**: Ensure that you have added your applications domain on the [Firebase console](https://console.firebase.google.com/), under
    **OAuth redirect domains**.
@@ -139,7 +140,7 @@ The code below shows a complete example of enrolling a second factor:
     verificationFailed: (_) {},
     codeSent: (String verificationId, int? resendToken) async {
       // See `firebase_auth` example app for a method of retrieving user's sms code: 
-      // https://github.com/firebase/flutterfire/blob/master/packages/firebase_auth/firebase_auth/example/lib/auth.dart#L591
+      // https://github.com/firebase/flutterfire/blob/main/packages/firebase_auth/firebase_auth/example/lib/auth.dart#L591
       final smsCode = await getSmsCodeFromUser(context);
 
       if (smsCode != null) {
@@ -269,7 +270,7 @@ try {
     verificationFailed: (_) {},
     codeSent: (String verificationId, int? resendToken) async {
       // See `firebase_auth` example app for a method of retrieving user's sms code: 
-      // https://github.com/firebase/flutterfire/blob/master/packages/firebase_auth/firebase_auth/example/lib/auth.dart#L591
+      // https://github.com/firebase/flutterfire/blob/main/packages/firebase_auth/firebase_auth/example/lib/auth.dart#L591
       final smsCode = await getSmsCodeFromUser(context);
 
       if (smsCode != null) {

@@ -2,18 +2,24 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-part of firebase.database_interop;
+part of 'database_interop.dart';
 
 @JS('TransactionResult')
-abstract class TransactionResultJsImpl {
-  external dynamic toJSON();
-  external bool get committed;
+@staticInterop
+abstract class TransactionResultJsImpl {}
+
+extension TransactionResultJsImplExtension on TransactionResultJsImpl {
+  external JSObject toJSON();
+  external JSBoolean get committed;
   external DataSnapshotJsImpl get snapshot;
 }
 
-@JS('Reference')
-abstract class ReferenceJsImpl extends QueryJsImpl {
-  external String? get key;
+@JS('DatabaseReference')
+@staticInterop
+abstract class ReferenceJsImpl extends QueryJsImpl {}
+
+extension ReferenceJsImplExtension on ReferenceJsImpl {
+  external JSString? get key;
 
   external ReferenceJsImpl? get parent;
 

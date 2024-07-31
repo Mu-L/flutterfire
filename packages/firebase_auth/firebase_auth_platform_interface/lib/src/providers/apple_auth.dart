@@ -46,6 +46,19 @@ class AppleAuthProvider extends AuthProvider {
     );
   }
 
+  /// Create a new [AppleAuthCredential] from a provided [idToken], [rawNonce] and [appleFullPersonName];
+  static OAuthCredential credentialWithIDToken(
+    String idToken,
+    String rawNonce,
+    AppleFullPersonName appleFullPersonName,
+  ) {
+    return AppleAuthCredential._credentialWithIDToken(
+      idToken,
+      rawNonce,
+      appleFullPersonName,
+    );
+  }
+
   /// This corresponds to the sign-in method identifier.
   static String get APPLE_SIGN_IN_METHOD {
     return _kProviderId;
@@ -57,7 +70,7 @@ class AppleAuthProvider extends AuthProvider {
   }
 
   List<String> _scopes = [];
-  Map<dynamic, dynamic> _parameters = {};
+  Map<String, String> _parameters = {};
 
   /// Returns the currently assigned scopes to this provider instance.
   List<String> get scopes {
@@ -65,7 +78,7 @@ class AppleAuthProvider extends AuthProvider {
   }
 
   /// Returns the parameters for this provider instance.
-  Map<dynamic, dynamic> get parameters {
+  Map<String, String> get parameters {
     return _parameters;
   }
 
@@ -78,7 +91,7 @@ class AppleAuthProvider extends AuthProvider {
   /// Sets the OAuth custom parameters to pass in a Apple OAuth
   /// request for popup and redirect sign-in operations.
   AppleAuthProvider setCustomParameters(
-    Map<dynamic, dynamic> customOAuthParameters,
+    Map<String, String> customOAuthParameters,
   ) {
     _parameters = customOAuthParameters;
     return this;
@@ -89,13 +102,52 @@ class AppleAuthProvider extends AuthProvider {
 /// [AppleAuthProvider.credential].
 class AppleAuthCredential extends OAuthCredential {
   AppleAuthCredential._({
-    required String accessToken,
+    String? accessToken,
+    String? rawNonce,
+    String? idToken,
+    AppleFullPersonName? appleFullPersonName,
   }) : super(
-            providerId: _kProviderId,
-            signInMethod: _kProviderId,
-            accessToken: accessToken);
+          providerId: _kProviderId,
+          signInMethod: _kProviderId,
+          accessToken: accessToken,
+          appleFullPersonName: appleFullPersonName,
+          rawNonce: rawNonce,
+          idToken: idToken,
+        );
 
   factory AppleAuthCredential._credential(String accessToken) {
-    return AppleAuthCredential._(accessToken: accessToken);
+    return AppleAuthCredential._(
+      accessToken: accessToken,
+    );
   }
+
+  factory AppleAuthCredential._credentialWithIDToken(
+    String idToken,
+    String rawNonce,
+    AppleFullPersonName appleFullPersonName,
+  ) {
+    return AppleAuthCredential._(
+      idToken: idToken,
+      rawNonce: rawNonce,
+      appleFullPersonName: appleFullPersonName,
+    );
+  }
+}
+
+class AppleFullPersonName {
+  AppleFullPersonName({
+    this.givenName,
+    this.familyName,
+    this.middleName,
+    this.nickname,
+    this.namePrefix,
+    this.nameSuffix,
+  });
+
+  final String? givenName;
+  final String? familyName;
+  final String? middleName;
+  final String? nickname;
+  final String? namePrefix;
+  final String? nameSuffix;
 }

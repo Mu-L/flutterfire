@@ -8,7 +8,7 @@ To learn more about Firebase Performance, please visit the [Firebase website](ht
 
 ## Getting Started
 
-To get started with Firebase Performance for Flutter, please [see the documentation](https://firebase.flutter.dev/docs/performance/overview).
+To get started with Firebase Performance for Flutter, please [see the documentation](https://firebase.google.com/docs/perf-mon/flutter/get-started).
 
 ## Usage
 
@@ -21,5 +21,5 @@ Please file FlutterFire specific issues, bugs, or feature requests in our [issue
 Plugin issues that are not specific to FlutterFire can be filed in the [Flutter issue tracker](https://github.com/flutter/flutter/issues/new).
 
 To contribute a change to this plugin,
-please review our [contribution guide](https://github.com/firebase/flutterfire/blob/master/CONTRIBUTING.md)
+please review our [contribution guide](https://github.com/firebase/flutterfire/blob/main/CONTRIBUTING.md)
 and open a [pull request](https://github.com/firebase/flutterfire/pulls).

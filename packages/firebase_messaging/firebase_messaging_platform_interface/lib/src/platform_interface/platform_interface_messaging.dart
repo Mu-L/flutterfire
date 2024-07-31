@@ -7,6 +7,7 @@ import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging_platform_interface/firebase_messaging_platform_interface.dart';
+import 'package:flutter/foundation.dart';
 import 'package:meta/meta.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
@@ -51,6 +52,10 @@ abstract class FirebaseMessagingPlatform extends PlatformInterface {
   /// It will always default to [MethodChannelFirebaseMessaging]
   /// if no other implementation was provided.
   static FirebaseMessagingPlatform get instance {
+    if (_instance == null) {
+      // This is only called for method channels since Web is setting the instance before we use `get`
+      MethodChannelFirebaseMessaging.setMethodCallHandlers();
+    }
     return _instance ??= MethodChannelFirebaseMessaging.instance;
   }
 
@@ -136,6 +141,9 @@ abstract class FirebaseMessagingPlatform extends PlatformInterface {
   /// This should be used to determine whether specific notification interaction
   /// should open the app with a specific purpose (e.g. opening a chat message,
   /// specific screen etc).
+  ///
+  /// on Android, if the message was received in the foreground, and the notification was
+  /// pressed whilst the app is in a background/terminated state, this will return `null`.
   Future<RemoteMessage?> getInitialMessage() {
     throw UnimplementedError('getInitialMessage() is not implemented');
   }

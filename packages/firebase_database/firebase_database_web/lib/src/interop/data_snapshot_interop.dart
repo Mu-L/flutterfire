@@ -2,34 +2,35 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-part of firebase.database_interop;
+part of 'database_interop.dart';
 
 @JS('DataSnapshot')
+@staticInterop
 @anonymous
-abstract class DataSnapshotJsImpl {
-  external String get key;
+abstract class DataSnapshotJsImpl {}
+
+extension DataSnapshotJsImpl$ on DataSnapshotJsImpl {
+  external JSString? get key;
+
+  external JSAny? /* JSString | num | null*/ get priority;
 
   external ReferenceJsImpl get ref;
 
-  external dynamic /* string | num | null*/ get priority;
+  external JSNumber get size;
 
-  external int get size;
+  external DataSnapshotJsImpl child(JSString path);
 
-  external DataSnapshotJsImpl child(String path);
+  external JSBoolean exists();
 
-  external bool exists();
+  external JSAny? exportVal();
 
-  external dynamic exportVal();
+  external JSBoolean forEach(JSFunction action);
 
-  external bool forEach(void Function(dynamic) action);
+  external JSBoolean hasChild(JSString path);
 
-  external dynamic getPriority();
+  external JSBoolean hasChildren();
 
-  external bool hasChild(String path);
+  external JSObject? toJSON();
 
-  external bool hasChildren();
-
-  external Object toJSON();
-
-  external dynamic val();
+  external JSAny? val();
 }
